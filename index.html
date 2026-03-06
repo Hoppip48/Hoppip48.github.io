@@ -168,10 +168,131 @@ body {
 
 .phase-subtitle {
   text-align: center;
-  color: var(--text-dim);
-  font-size: 1.05rem;
+  color: var(--cream);
+  font-size: 1.25rem;
   font-style: italic;
   margin-bottom: 28px;
+  padding: 10px 20px;
+  background: rgba(201,169,110,0.07);
+  border-radius: 6px;
+  border-left: 3px solid var(--gold-dim);
+}
+
+/* ====== DISCARD PILE ====== */
+.discard-panel {
+  position: fixed;
+  right: 12px;
+  top: 90px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.discard-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.discard-count {
+  font-family: 'Playfair Display', serif;
+  font-size: 0.75rem;
+  color: var(--gold-dim);
+  text-align: center;
+}
+
+.discard-stack-container {
+  position: relative;
+  width: 54px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.discard-stack-container:hover { transform: scale(1.05); }
+
+.discard-stack-card {
+  position: absolute;
+  left: 0;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+
+.discard-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Cormorant Garamond', serif;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.discard-toggle:hover { border-color: var(--gold-dim); color: var(--gold); }
+
+.discard-full {
+  position: fixed;
+  right: 12px;
+  top: 80px;
+  bottom: 20px;
+  width: 200px;
+  z-index: 300;
+  background: rgba(9,9,14,0.97);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  animation: slideInRight 0.2s ease;
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.discard-full-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 0.85rem;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.discard-full-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.discard-close {
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+}
+
+.discard-close:hover { border-color: var(--gold-dim); color: var(--gold); }
+
+@media (max-width: 600px) {
+  .discard-panel { right: 4px; }
+  .discard-full { width: 160px; right: 4px; }
 }
 
 /* ====== CARDS ====== */
@@ -708,8 +829,73 @@ body {
 'use strict';
 
 // ============================
-// CONSTANTS & UTILS
+// SFX ENGINE
 // ============================
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
+}
+
+function playSound(type) {
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+
+    if (type === 'exchange') {
+      // Light whoosh: short filtered noise burst
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 3000;
+      filter.Q.value = 0.8;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      src.start(now);
+
+    } else if (type === 'discard') {
+      // Heavy thud: low thump
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now); osc.stop(now + 0.3);
+      // Add noise layer
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+      const ns = ctx.createBufferSource(); ns.buffer = buf;
+      const ng = ctx.createGain(); ng.gain.setValueAtTime(0.25, now);
+      ns.connect(ng); ng.connect(ctx.destination); ns.start(now);
+
+    } else if (type === 'play') {
+      // Decisive snap: sharp transient + short tone
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.05, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.2);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1200;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.4, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(now);
+      // Tone accent
+      const osc = ctx.createOscillator(); const og = ctx.createGain();
+      osc.frequency.value = 880;
+      og.gain.setValueAtTime(0.15, now); og.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(og); og.connect(ctx.destination); osc.start(now); osc.stop(now + 0.12);
+    }
+  } catch(e) { /* silently ignore if audio blocked */ }
+}
 const SUITS = ['♠', '♥', '♦', '♣'];
 const VALUES = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const RED_SUITS = new Set(['♥','♦']);
@@ -794,7 +980,8 @@ function initGame() {
     bancoQueue: [],
     selectedCards: [],
     lastResult: null,
-    turn: 1
+    turn: 1,
+    discardOpen: false
   };
   render();
 }
@@ -880,7 +1067,7 @@ function resolveRound(play0, play1) {
   // Same figure vs same: draw (already 'draw')
 
   if (winner === 'draw') {
-    notes.push('Pareggio — nessun Debito™ assegnato.');
+    notes.push('Pareggio — nessun Debito assegnato.');
     return { winner: 'draw', p0Debito: 0, p1Debito: 0, notes, jokerWon: false };
   }
 
@@ -892,14 +1079,14 @@ function resolveRound(play0, play1) {
 
   if (doubleDebito) {
     loserDebito *= 2;
-    notes.push("L'Asso infligge il doppio del Debito™!");
+    notes.push("L'Asso infligge il doppio del Debito!");
   }
   if (halfDebito) {
     loserDebito = Math.ceil(loserDebito / 2);
-    notes.push("Il Re dimezza il Debito™ subito (arrotondato per eccesso).");
+    notes.push("Il Re dimezza il Debito subito (arrotondato per eccesso).");
   }
 
-  notes.push(`${G.players[loser].name} +${loserDebito} Debito™ → ${G.players[winner].name} −${loserDebito} Debito™.`);
+  notes.push(`${G.players[loser].name} +${loserDebito} Debito → ${G.players[winner].name} −${loserDebito} Debito.`);
 
   return {
     winner,
@@ -954,7 +1141,7 @@ function cardWrapperHTML(card, idx, opts = {}) {
   const disClass = disabled ? 'disabled' : '';
   return `<div class="card-wrapper ${selClass} ${disClass}" onclick="${onclick}">
     ${cardHTML(card)}
-    ${showDebito ? `<div class="card-debito">D™${card.value === 'JOKER' ? '?' : cardDebitoVal(card)}</div>` : ''}
+    ${showDebito ? `<div class="card-debito">D${card.value === 'JOKER' ? '?' : cardDebitoVal(card)}</div>` : ''}
     ${fromBanco ? `<div class="card-source banco">Banco</div>` : `<div class="card-source">Mano</div>`}
   </div>`;
 }
@@ -979,7 +1166,7 @@ function headerHTML() {
     return h;
   }
 
-  const maxDebito = 11;
+  const maxDebito = 22;
   const d0Class = p0.debito <= 3 ? 'debito-value danger' : p0.debito === 0 ? 'debito-value safe' : 'debito-value';
   const d1Class = p1.debito <= 3 ? 'debito-value danger' : p1.debito === 0 ? 'debito-value safe' : 'debito-value';
 
@@ -1003,7 +1190,7 @@ function headerHTML() {
         <div class="pip-bar">${pipsHTML(p1.debito, maxDebito)}</div>
       </div>
     </div>
-    <div class="turn-info">Turno ${G.turn} · Mazzo: ${G.deck.length} carte · Totale Debito™: ${G.players[0].debito + G.players[1].debito}</div>
+    <div class="turn-info">Turno ${G.turn} · Mazzo: ${G.deck.length} carte rimanenti</div>
   </div>`;
 }
 
@@ -1030,12 +1217,65 @@ function render() {
     case 'play_p2':       html += playHTML(1); break;
     case 'joker_pick':    html += jokerPickHTML(); break;
     case 'reveal':        html += revealHTML(); break;
+    case 'cover_banco':   html += coverHTML(`Passa il computer a ${G.players[G.bancoQueue[0]].name}`, 'continua_cover_banco'); break;
     case 'banco_bonus':   html += bancoBonusHTML(); break;
     case 'game_over':     html += gameOverHTML(); break;
   }
 
   html += '</div>';
+
+  // Discard pile overlay (shown whenever game is active and not cover screens)
+  const hiddenPhases = new Set(['cover_ex_p2','cover_play_p1','cover_play_p2','cover_banco','game_over']);
+  if (!hiddenPhases.has(G.phase) && G.discard.length > 0) {
+    html += discardPileHTML();
+  }
+
   app.innerHTML = html;
+}
+
+// ============================
+// DISCARD PILE
+// ============================
+function discardPileHTML() {
+  const pile = G.discard;
+  if (pile.length === 0) return '';
+
+  if (G.discardOpen) {
+    const cards = [...pile].reverse().map(c =>
+      `<div style="flex-shrink:0">${cardHTML(c, 'small')}</div>`
+    ).join('');
+    return `<div class="discard-full">
+      <div class="discard-full-title">Scarti (${pile.length})</div>
+      <div class="discard-full-grid">${cards}</div>
+      <button class="discard-close" onclick="G.discardOpen=false;render()">✕ Chiudi</button>
+    </div>`;
+  }
+
+  // Compact stack: show top 5 cards offset
+  const top5 = pile.slice(-5);
+  const stackH = 76 + (top5.length - 1) * 7;
+  let stackCards = '';
+  top5.forEach((card, i) => {
+    const offset = i * 7;
+    const isRed = card.suit && RED_SUITS.has(card.suit);
+    const bg = card.value === 'JOKER'
+      ? 'linear-gradient(135deg,#1a1240,#2a1060)'
+      : (isRed ? '#f7f2e8' : '#f7f2e8');
+    const col = card.value === 'JOKER' ? '#c9a96e' : (isRed ? '#b52820' : '#1a1820');
+    const label = card.value + (card.suit || '');
+    stackCards += `<div class="discard-stack-card" style="top:${offset}px;width:54px;height:76px;background:${bg};display:flex;align-items:center;justify-content:center;">
+      <span style="font-family:'Playfair Display',serif;font-size:0.7rem;font-weight:700;color:${col};text-align:center;line-height:1.1">${label}</span>
+    </div>`;
+  });
+
+  return `<div class="discard-panel">
+    <div class="discard-label">Scarti</div>
+    <div class="discard-stack-container" style="height:${stackH}px" onclick="G.discardOpen=true;render()">
+      ${stackCards}
+    </div>
+    <div class="discard-count">${pile.length} carte</div>
+    <button class="discard-toggle" onclick="G.discardOpen=true;render()">▼ Vedi</button>
+  </div>`;
 }
 
 // ============================
@@ -1050,13 +1290,13 @@ function startScreenHTML() {
 
       <div class="rules-summary">
         <h3>Come si gioca</h3>
-        <div class="rule-item"><span class="rule-card-label">Obiettivo</span><span>Arrivare a 0 Debito™ (si inizia con 11). Il perdente di ogni round subisce Debito™ pari al valore della <em>propria</em> carta.</span></div>
-        <div class="rule-item"><span class="rule-card-label">Asso</span><span>Batte le figure (doppio danno), perde contro i numeri. Debito™: 1.</span></div>
-        <div class="rule-item"><span class="rule-card-label">Jack</span><span>Batte i dispari (3,5,7,9), perde contro i pari e la Regina. Debito™: 5.</span></div>
-        <div class="rule-item"><span class="rule-card-label">Regina</span><span>Batte i pari (2,4,6,8,10), perde contro i dispari e il Re. Debito™: 6.</span></div>
-        <div class="rule-item"><span class="rule-card-label">Re</span><span>Batte tutto tranne l'Asso. Il perdente subisce solo metà Debito™. Debito™: 7.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Obiettivo</span><span>Arrivare a 0 Debito (si inizia con 11). Il perdente di ogni round subisce Debito pari al valore della <em>propria</em> carta.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Asso</span><span>Batte le figure (doppio danno), perde contro i numeri. Debito: 1.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Jack</span><span>Batte i dispari (3,5,7,9), perde contro i pari e la Regina. Debito: 5.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Regina</span><span>Batte i pari (2,4,6,8,10), perde contro i dispari e il Re. Debito: 6.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Re</span><span>Batte tutto tranne l'Asso. Il perdente subisce solo metà Debito. Debito: 7.</span></div>
         <div class="rule-item"><span class="rule-card-label">Joker</span><span>Copia il valore di una carta in mano. Non può vincere la partita (avversario scende a min. 1).</span></div>
-        <div class="rule-item"><span class="rule-card-label">Multi</span><span>Puoi giocare più carte dello stesso numero (non figure). I valori si sommano, ma il Debito™ subito è di una singola carta.</span></div>
+        <div class="rule-item"><span class="rule-card-label">Multi</span><span>Puoi giocare più carte dello stesso numero (non figure). I valori si sommano, ma il Debito subito è di una singola carta.</span></div>
       </div>
 
       <button class="btn btn-primary" onclick="initGame()">Inizia Partita</button>
@@ -1171,7 +1411,7 @@ function playHTML(pIdx) {
       ${sel.length > 0
         ? `<div class="selected-info">
             Giochi: ${sel.map(c => c.value + (c.suit || '')).join(' + ')}
-            ${totalVal !== null ? ` = <strong>${totalVal}</strong> (Debito™ a rischio: ${singleDebito})` : ` (Debito™ a rischio: ${singleDebito})`}
+            ${totalVal !== null ? ` = <strong>${totalVal}</strong> (Debito a rischio: ${singleDebito})` : ` (Debito a rischio: ${singleDebito})`}
            </div>
            <button class="btn btn-primary" onclick="doAction('play_confirm', ${pIdx})">Conferma →</button>`
         : `<div class="hint">Seleziona una carta dalla mano o dal Banco</div>`
@@ -1198,7 +1438,7 @@ function jokerPickHTML() {
   const cards = available.map(card =>
     `<div class="card-wrapper" onclick="doAction('joker_copy', ${pIdx}, ${card.id})">
       ${cardHTML(card)}
-      <div class="card-debito">D™${cardDebitoVal(card)} → Joker vale questo</div>
+      <div class="card-debito">D${cardDebitoVal(card)} → Joker vale questo</div>
     </div>`
   ).join('');
 
@@ -1251,9 +1491,8 @@ function revealHTML() {
       }
 
       // Transfer: loser GAINS debito (BAD), winner LOSES debito (GOOD)
-      G.players[loserIdx].debito += amount;
-      G.players[winnerIdx].debito -= amount;
-      G.players[winnerIdx].debito = Math.max(0, G.players[winnerIdx].debito);
+      G.players[loserIdx].debito = Math.min(22, G.players[loserIdx].debito + amount);
+      G.players[winnerIdx].debito = Math.max(0, G.players[winnerIdx].debito - amount);
 
       G._appliedAmount = amount;
       G._appliedLoser = loserIdx;
@@ -1272,7 +1511,7 @@ function revealHTML() {
 
   let winnerBanner = '';
   if (result.winner === 'draw') {
-    winnerBanner = `<div class="reveal-draw-banner">🤝 Pareggio — nessun Debito™ assegnato</div>`;
+    winnerBanner = `<div class="reveal-draw-banner">🤝 Pareggio — nessun Debito assegnato</div>`;
   } else {
     const wName = G.players[result.winner].name;
     winnerBanner = `<div class="reveal-winner-banner">🏆 ${wName} vince il turno</div>`;
@@ -1281,17 +1520,17 @@ function revealHTML() {
   function sideHTML(play, pIdx) {
     const delta = pIdx === 0 ? aD0 : aD1; // positive = gained debito (loser), negative = lost debito (winner)
     let deltaEl = '';
-    if (delta > 0)       deltaEl = `<div class="debito-loss">+${delta} Debito™ ↑</div>`;
-    else if (delta < 0)  deltaEl = `<div class="debito-gain">−${Math.abs(delta)} Debito™ ↓</div>`;
+    if (delta > 0)       deltaEl = `<div class="debito-loss">+${delta} Debito ↑</div>`;
+    else if (delta < 0)  deltaEl = `<div class="debito-gain">−${Math.abs(delta)} Debito ↓</div>`;
     else                 deltaEl = `<div style="color:var(--text-dim);font-style:italic;font-size:0.9rem">nessuna variazione</div>`;
     return `<div class="reveal-side">
       <div class="reveal-player-name">${G.players[pIdx].name}</div>
       <div class="hand-container">${play.cards.map(c => cardHTML(c)).join('')}</div>
       ${play.cards[0].value === 'JOKER' && play.jokerCopy
-        ? `<div class="joker-copy-label">🃏 Copia: ${play.jokerCopy.value}${play.jokerCopy.suit || ''} (D™${cardDebitoVal(play.jokerCopy)})</div>` : ''}
+        ? `<div class="joker-copy-label">🃏 Copia: ${play.jokerCopy.value}${play.jokerCopy.suit || ''} (D${cardDebitoVal(play.jokerCopy)})</div>` : ''}
       ${play.cards.length > 1 ? `<div class="combo-value">Totale: ${playTotalValue(play)}</div>` : ''}
       ${deltaEl}
-      <div style="font-size:0.85rem;color:var(--text-dim)">Debito™ ora: ${G.players[pIdx].debito}</div>
+      <div style="font-size:0.85rem;color:var(--text-dim)">Debito ora: ${G.players[pIdx].debito}</div>
     </div>`;
   }
 
@@ -1307,7 +1546,7 @@ function revealHTML() {
 
     <div class="result-notes">
       ${result.notes.map(n => `<div class="note">· ${n}</div>`).join('')}
-      ${result.jokerWon ? '<div class="note" style="color:#9b8dc0">· Il Joker non può vincere la partita: il Debito™ avversario si ferma ad almeno 1.</div>' : ''}
+      ${result.jokerWon ? '<div class="note" style="color:#9b8dc0">· Il Joker non può vincere la partita: il Debito avversario si ferma ad almeno 1.</div>' : ''}
     </div>
 
     <div class="action-bar">
@@ -1331,7 +1570,7 @@ function bancoBonusHTML() {
     const fromBanco = !!p.banco.find(b => b.id === card.id);
     return `<div class="card-wrapper" onclick="doAction('banco_discard', ${pIdx}, ${card.id})">
       ${cardHTML(card)}
-      <div class="card-debito">D™${card.value === 'JOKER' ? '?' : cardDebitoVal(card)}</div>
+      <div class="card-debito">D${card.value === 'JOKER' ? '?' : cardDebitoVal(card)}</div>
       <div class="card-source ${fromBanco ? 'banco' : ''}">${fromBanco ? 'Banco' : 'Mano'}</div>
     </div>`;
   }).join('');
@@ -1355,18 +1594,18 @@ function gameOverHTML() {
   let msg;
 
   if (d0 <= 0 && d1 <= 0) msg = 'Pareggio!';
-  else if (d0 <= 0) msg = `${G.players[0].name} è libero dal Debito™!`;
-  else if (d1 <= 0) msg = `${G.players[1].name} è libero dal Debito™!`;
-  else if (d0 < d1) msg = `${G.players[0].name} vince — meno Debito™!`;
-  else if (d1 < d0) msg = `${G.players[1].name} vince — meno Debito™!`;
-  else msg = 'Pareggio — stesso Debito™ rimasto!';
+  else if (d0 <= 0) msg = `${G.players[0].name} è libero dal Debito!`;
+  else if (d1 <= 0) msg = `${G.players[1].name} è libero dal Debito!`;
+  else if (d0 < d1) msg = `${G.players[0].name} vince — meno Debito!`;
+  else if (d1 < d0) msg = `${G.players[1].name} vince — meno Debito!`;
+  else msg = 'Pareggio — stesso Debito rimasto!';
 
   return `<div class="game-over-screen">
     <div class="game-over-title">— Fine Partita —</div>
     <div class="game-over-winner">${msg}</div>
     <div class="game-over-scores">
-      <div>${G.players[0].name}: <strong>${d0}</strong> Debito™</div>
-      <div>${G.players[1].name}: <strong>${d1}</strong> Debito™</div>
+      <div>${G.players[0].name}: <strong>${d0}</strong> Debito</div>
+      <div>${G.players[1].name}: <strong>${d1}</strong> Debito</div>
     </div>
     <button class="btn btn-primary" onclick="doAction('restart')">Nuova Partita</button>
   </div>`;
@@ -1393,6 +1632,10 @@ function doAction(action, ...args) {
       G.selectedCards = [];
       break;
 
+    case 'continua_cover_banco':
+      G.phase = 'banco_bonus';
+      break;
+
     // Exchange
     case 'exchange_select': {
       const [pIdx, cardId] = args;
@@ -1405,6 +1648,7 @@ function doAction(action, ...args) {
       const [pIdx] = args;
       if (!G.exchanges[pIdx]) return;
       if (pIdx === 0) {
+        playSound('exchange');
         G.phase = 'cover_ex_p2';
       } else {
         // Execute both exchanges
@@ -1417,6 +1661,7 @@ function doAction(action, ...args) {
         ex1.fromExchange = true;
         G.players[1].banco.push(ex0);
         G.players[0].banco.push(ex1);
+        playSound('exchange');
         G.phase = 'cover_play_p1';
       }
       break;
@@ -1462,6 +1707,7 @@ function doAction(action, ...args) {
       };
 
       G.selectedCards = [];
+      playSound('play');
 
       if (pIdx === 0) {
         G.phase = 'cover_play_p2';
@@ -1511,7 +1757,7 @@ function doAction(action, ...args) {
       G.bancoQueue = bancoQueue;
 
       if (bancoQueue.length > 0) {
-        G.phase = 'banco_bonus';
+        G.phase = 'cover_banco';
       } else {
         drawAndNextTurn();
         return;
@@ -1540,15 +1786,16 @@ function doAction(action, ...args) {
       p.hand = p.hand.filter(c => c.id !== cardId);
       p.banco = p.banco.filter(c => c.id !== cardId);
       G.discard.push(card);
+      playSound('discard');
       G.bancoQueue.shift();
-      if (G.bancoQueue.length > 0) break;
+      if (G.bancoQueue.length > 0) { G.phase = 'cover_banco'; break; }
       drawAndNextTurn();
       return;
     }
 
     case 'banco_skip': {
       G.bancoQueue.shift();
-      if (G.bancoQueue.length > 0) break;
+      if (G.bancoQueue.length > 0) { G.phase = 'cover_banco'; break; }
       drawAndNextTurn();
       return;
     }
